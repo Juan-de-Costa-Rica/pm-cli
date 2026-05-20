@@ -2,6 +2,23 @@
 
 A command-line interface for ProtonMail via Proton Bridge IMAP/SMTP. Designed for terminal use and AI agent integration.
 
+## Fork Notes
+
+This is a maintained fork of [bscott/pm-cli](https://github.com/bscott/pm-cli) with additional features for headless and automation use cases. All changes have been submitted upstream as issues with corresponding branches.
+
+**What's different from upstream:**
+
+- Read the Bridge password from `PM_CLI_BRIDGE_PASSWORD` environment variable, so the system keyring is not required on headless servers ([#8](https://github.com/bscott/pm-cli/issues/8))
+- Server-side filtering (`--unread`, `--flagged`), field selection (`--fields`, `--compact`), and additional envelope fields (`from_address`, `to`, `message_id`, `in_reply_to`) for `mail list` ([#9](https://github.com/bscott/pm-cli/issues/9))
+- `mail batch` subcommand for running multiple IMAP operations in a single session ([#10](https://github.com/bscott/pm-cli/issues/10))
+- Fix silent no-ops when STORE/COPY targets UIDs not present in the selected mailbox ([#11](https://github.com/bscott/pm-cli/issues/11))
+
+To install this fork:
+
+```bash
+go install github.com/Juan-de-Costa-Rica/pm-cli/cmd/pm-cli@deploy
+```
+
 ## Installation
 
 ```bash
@@ -275,7 +292,7 @@ defaults:
   format: text
 ```
 
-Password is stored securely in the system keyring (libsecret on Linux).
+Password is stored securely in the system keyring (libsecret on Linux), or can be provided via the `PM_CLI_BRIDGE_PASSWORD` environment variable for headless setups.
 
 ## Global Flags
 
