@@ -130,7 +130,15 @@ func (c *Config) SetPassword(password string) error {
 	return keyring.Set(AppName, c.Bridge.Email, password)
 }
 
+// BridgePasswordEnvVar holds the Bridge password when set, taking precedence
+// over the system keyring. This is intended for headless/CI environments where
+// no secret service is available; interactive users should prefer the keyring.
+const BridgePasswordEnvVar = "PM_CLI_BRIDGE_PASSWORD"
+
 func (c *Config) GetPassword() (string, error) {
+	if envPass := os.Getenv(BridgePasswordEnvVar); envPass != "" {
+		return envPass, nil
+	}
 	if c.Bridge.Email == "" {
 		return "", errors.New("email not configured")
 	}

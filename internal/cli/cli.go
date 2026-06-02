@@ -5,7 +5,7 @@ import (
 	"github.com/bscott/pm-cli/internal/output"
 )
 
-var Version = "0.2.5"
+var Version = "0.3.0"
 
 type Globals struct {
 	JSON     bool   `help:"Output as JSON" name:"json"`
@@ -99,6 +99,12 @@ type MailCmd struct {
 	Label     LabelCmd         `cmd:"" help:"Manage message labels"`
 	Summarize MailSummarizeCmd `cmd:"" help:"Summarize message for AI processing"`
 	Extract   MailExtractCmd   `cmd:"" help:"Extract structured data from message"`
+	Batch     MailBatchCmd     `cmd:"" help:"Run multiple operations in one IMAP session (JSON from stdin)"`
+}
+
+type MailBatchCmd struct {
+	File        string `help:"Read operations from a file instead of stdin" short:"f" type:"existingfile"`
+	StopOnError bool   `help:"Stop after the first failed operation" name:"stop-on-error"`
 }
 
 type MailSummarizeCmd struct {
@@ -183,6 +189,9 @@ type MailListCmd struct {
 	Offset  int    `help:"Skip first N messages" default:"0"`
 	Page    int    `help:"Page number (1-based, combines with limit)" short:"p" default:"0"`
 	Unread  bool   `help:"Only show unread messages"`
+	Flagged bool   `help:"Only show flagged/starred messages"`
+	Fields  string `help:"Comma-separated fields to include in JSON output (e.g. uid,subject,from_address)"`
+	Compact bool   `help:"Output a bare JSON array instead of the wrapper object (JSON mode only)"`
 }
 
 type MailReadCmd struct {

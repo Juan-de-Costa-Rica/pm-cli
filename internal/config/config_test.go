@@ -247,12 +247,41 @@ func TestSetPasswordWithoutEmail(t *testing.T) {
 }
 
 func TestGetPasswordWithoutEmail(t *testing.T) {
+	// Ensure the env var doesn't mask the no-email error path.
+	t.Setenv(BridgePasswordEnvVar, "")
 	cfg := DefaultConfig()
 	// Email is empty by default
 
 	_, err := cfg.GetPassword()
 	if err == nil {
 		t.Error("expected error when getting password without email")
+	}
+}
+
+func TestGetPasswordFromEnvVar(t *testing.T) {
+	cfg := DefaultConfig()
+	t.Setenv(BridgePasswordEnvVar, "env-secret-123")
+
+	password, err := cfg.GetPassword()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if password != "env-secret-123" {
+		t.Errorf("got %q, want %q", password, "env-secret-123")
+	}
+}
+
+func TestGetPasswordEnvVarTakesPrecedence(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Bridge.Email = "test@example.com"
+	t.Setenv(BridgePasswordEnvVar, "env-wins")
+
+	password, err := cfg.GetPassword()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if password != "env-wins" {
+		t.Errorf("got %q, want %q", password, "env-wins")
 	}
 }
 

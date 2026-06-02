@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -228,8 +229,12 @@ func (c *Client) SelectMailbox(name string) (*MailboxStatus, error) {
 	}, nil
 }
 
-func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool) ([]MessageSummary, error) {
-	status, err := c.SelectMailbox(mailbox)
+func (c *Client) ListMessages(opts ListOptions) ([]MessageSummary, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+
+	status, err := c.SelectMailbox(opts.Mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -238,22 +243,59 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 		return []MessageSummary{}, nil
 	}
 
-	// Calculate the range of messages to fetch (most recent first, with offset)
-	// offset=0: get the last `limit` messages
-	// offset=20: skip the 20 most recent, get the next `limit`
-	total := int(status.Messages)
-	end := total - offset
-	if end <= 0 {
-		return []MessageSummary{}, nil
-	}
-	start := end - limit + 1
-	if start < 1 {
-		start = 1
-	}
-
-	// Build sequence set for range
+	// Build the sequence set of messages to fetch. When filtering by flags we
+	// ask the server to do the work (SEARCH), so the returned count honors the
+	// requested limit instead of being thinned out by client-side filtering.
 	var seqSet imap.SeqSet
-	seqSet.AddRange(uint32(start), uint32(end))
+	if opts.UnreadOnly || opts.FlaggedOnly {
+		criteria := &imap.SearchCriteria{}
+		if opts.UnreadOnly {
+			criteria.NotFlag = append(criteria.NotFlag, imap.FlagSeen)
+		}
+		if opts.FlaggedOnly {
+			criteria.Flag = append(criteria.Flag, imap.FlagFlagged)
+		}
+
+		searchCmd := c.client.Search(criteria, nil)
+		searchData, err := searchCmd.Wait()
+		if err != nil {
+			return nil, fmt.Errorf("search failed: %w", err)
+		}
+
+		seqNums := searchData.AllSeqNums()
+		if len(seqNums) == 0 {
+			return []MessageSummary{}, nil
+		}
+
+		// Newest first: SEARCH returns ascending sequence numbers, so sort
+		// descending before applying offset/limit (skip the most recent first).
+		sort.Slice(seqNums, func(i, j int) bool { return seqNums[i] > seqNums[j] })
+
+		if opts.Offset >= len(seqNums) {
+			return []MessageSummary{}, nil
+		}
+		endIdx := opts.Offset + opts.Limit
+		if endIdx > len(seqNums) {
+			endIdx = len(seqNums)
+		}
+		for _, seq := range seqNums[opts.Offset:endIdx] {
+			seqSet.AddNum(seq)
+		}
+	} else {
+		// Calculate the range of messages to fetch (most recent first, with offset)
+		// offset=0: get the last `limit` messages
+		// offset=20: skip the 20 most recent, get the next `limit`
+		total := int(status.Messages)
+		end := total - opts.Offset
+		if end <= 0 {
+			return []MessageSummary{}, nil
+		}
+		start := end - opts.Limit + 1
+		if start < 1 {
+			start = 1
+		}
+		seqSet.AddRange(uint32(start), uint32(end))
+	}
 
 	// Fetch options
 	fetchOptions := &imap.FetchOptions{
@@ -303,7 +345,6 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 			continue
 		}
 
-		// Check if unread only
 		seen := false
 		flagged := false
 		for _, f := range flags {
@@ -315,29 +356,41 @@ func (c *Client) ListMessages(mailbox string, limit, offset int, unreadOnly bool
 			}
 		}
 
-		if unreadOnly && seen {
-			continue
-		}
-
 		from := ""
+		fromAddress := ""
 		if len(envelope.From) > 0 {
 			addr := envelope.From[0]
+			fromAddress = addr.Addr()
 			if addr.Name != "" {
 				from = addr.Name
 			} else {
-				from = addr.Addr()
+				from = fromAddress
 			}
 		}
 
+		var to []string
+		for _, addr := range envelope.To {
+			to = append(to, addr.Addr())
+		}
+
+		inReplyTo := ""
+		if len(envelope.InReplyTo) > 0 {
+			inReplyTo = envelope.InReplyTo[0]
+		}
+
 		summary := MessageSummary{
-			UID:     uint32(uid),
-			SeqNum:  msg.SeqNum,
-			From:    from,
-			Subject: envelope.Subject,
-			Date:    date,
-			DateISO: dateISO,
-			Seen:    seen,
-			Flagged: flagged,
+			UID:         uint32(uid),
+			SeqNum:      msg.SeqNum,
+			From:        from,
+			FromAddress: fromAddress,
+			To:          to,
+			MessageID:   envelope.MessageID,
+			InReplyTo:   inReplyTo,
+			Subject:     envelope.Subject,
+			Date:        date,
+			DateISO:     dateISO,
+			Seen:        seen,
+			Flagged:     flagged,
 		}
 
 		messages = append(messages, summary)
@@ -661,24 +714,40 @@ func (c *Client) Search(mailbox string, opts SearchOptions) ([]MessageSummary, e
 		}
 
 		fromStr := ""
+		fromAddress := ""
 		if len(envelope.From) > 0 {
 			addr := envelope.From[0]
+			fromAddress = addr.Addr()
 			if addr.Name != "" {
 				fromStr = addr.Name
 			} else {
-				fromStr = addr.Addr()
+				fromStr = fromAddress
 			}
 		}
 
+		var to []string
+		for _, addr := range envelope.To {
+			to = append(to, addr.Addr())
+		}
+
+		inReplyTo := ""
+		if len(envelope.InReplyTo) > 0 {
+			inReplyTo = envelope.InReplyTo[0]
+		}
+
 		summary := MessageSummary{
-			UID:     uint32(uid),
-			SeqNum:  msg.SeqNum,
-			From:    fromStr,
-			Subject: envelope.Subject,
-			Date:    envelope.Date.Format("2006-01-02 15:04"),
-			DateISO: envelope.Date.Format(time.RFC3339),
-			Seen:    seen,
-			Flagged: flagged,
+			UID:         uint32(uid),
+			SeqNum:      msg.SeqNum,
+			From:        fromStr,
+			FromAddress: fromAddress,
+			To:          to,
+			MessageID:   envelope.MessageID,
+			InReplyTo:   inReplyTo,
+			Subject:     envelope.Subject,
+			Date:        envelope.Date.Format("2006-01-02 15:04"),
+			DateISO:     envelope.Date.Format(time.RFC3339),
+			Seen:        seen,
+			Flagged:     flagged,
 		}
 
 		messages = append(messages, summary)
@@ -1343,7 +1412,7 @@ func (c *Client) UpdateDraft(id string, draft *Draft) (uint32, error) {
 
 // ListDrafts returns drafts from the Drafts folder
 func (c *Client) ListDrafts(limit int) ([]MessageSummary, error) {
-	return c.ListMessages("Drafts", limit, 0, false)
+	return c.ListMessages(ListOptions{Mailbox: "Drafts", Limit: limit})
 }
 
 // GetDraft retrieves a specific draft

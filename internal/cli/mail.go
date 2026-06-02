@@ -56,16 +56,36 @@ func (c *MailListCmd) Run(ctx *Context) error {
 		offset = (c.Page - 1) * limit
 	}
 
-	messages, err := client.ListMessages(mailbox, limit, offset, c.Unread)
+	messages, err := client.ListMessages(imap.ListOptions{
+		Mailbox:     mailbox,
+		Limit:       limit,
+		Offset:      offset,
+		UnreadOnly:  c.Unread,
+		FlaggedOnly: c.Flagged,
+	})
 	if err != nil {
 		return err
 	}
 
 	if ctx.Formatter.JSON {
+		// --fields/--compact only affect JSON output; text output is unchanged.
+		var payload interface{} = messages
+		if c.Fields != "" {
+			fields, err := parseFields(c.Fields)
+			if err != nil {
+				return err
+			}
+			payload = filterMessageFields(messages, fields)
+		}
+
+		if c.Compact {
+			return ctx.Formatter.PrintJSON(payload)
+		}
+
 		result := map[string]interface{}{
 			"mailbox":  mailbox,
 			"count":    len(messages),
-			"messages": messages,
+			"messages": payload,
 			"offset":   offset,
 			"limit":    limit,
 		}
@@ -76,12 +96,16 @@ func (c *MailListCmd) Run(ctx *Context) error {
 	}
 
 	if len(messages) == 0 {
-		fmt.Printf("No %smessages in %s\n", func() string {
-			if c.Unread {
-				return "unread "
-			}
-			return ""
-		}(), mailbox)
+		qualifier := ""
+		switch {
+		case c.Unread && c.Flagged:
+			qualifier = "unread flagged "
+		case c.Unread:
+			qualifier = "unread "
+		case c.Flagged:
+			qualifier = "flagged "
+		}
+		fmt.Printf("No %smessages in %s\n", qualifier, mailbox)
 		return nil
 	}
 
@@ -1812,7 +1836,7 @@ func (c *MailWatchCmd) populateSeenUIDs(ctx *Context, seenUIDs map[uint32]bool) 
 	defer client.Close()
 
 	// Get existing messages (reasonable limit)
-	messages, err := client.ListMessages(c.Mailbox, 100, 0, false)
+	messages, err := client.ListMessages(imap.ListOptions{Mailbox: c.Mailbox, Limit: 100})
 	if err != nil {
 		return err
 	}
@@ -1836,7 +1860,7 @@ func (c *MailWatchCmd) checkForNewMessages(ctx *Context, seenUIDs map[uint32]boo
 	defer client.Close()
 
 	// Get recent messages
-	messages, err := client.ListMessages(c.Mailbox, 50, 0, false)
+	messages, err := client.ListMessages(imap.ListOptions{Mailbox: c.Mailbox, Limit: 50})
 	if err != nil {
 		return nil, err
 	}
