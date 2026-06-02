@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Targeted for the 0.3.0 release.
+Targeted for the 0.2.6 release.
 
 
 ### Added
